@@ -1,0 +1,17 @@
+{
+    "TTN_APP_ID": "name-app-ttn",
+    "TTN_API_KEY": "api-key",
+    "TTN_BROKER": "server-address",
+    "TTN_PORT": server-port,  //replace with the ttn port
+    "THINGSBOARD_SERVER": "https://micro-red.ucuenca.edu.ec",
+    "DEVICE_TOKENS": {
+        "00000": "thingsboard-key-1",
+        "00002": "thingsboard-key-1"
+    },
+    "BUTTON_TO_DEVICE": {
+        "0000": "SHAYA-ID1",
+        "0002": "SHAYA-ID2"
+    },
+    "POST_URL_TEMPLATE": "POST URL",
+    "PUT_URL_TEMPLATE": "PUT URL"
+}
