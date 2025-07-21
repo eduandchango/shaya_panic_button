@@ -3,7 +3,7 @@
     "TTN_API_KEY": "api-key",
     "TTN_BROKER": "server-address",
     "TTN_PORT": server-port,  //replace with the ttn port
-    "THINGSBOARD_SERVER": "https://micro-red.ucuenca.edu.ec",
+    "THINGSBOARD_SERVER": "server-address",
     "DEVICE_TOKENS": {
         "00000": "thingsboard-key-1",
         "00002": "thingsboard-key-1"
