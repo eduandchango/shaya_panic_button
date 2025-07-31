@@ -6,42 +6,7 @@
 #include <DS3232RTC.h>
 
 // Define DEBUG_MODE to enable Serial prints. Comment out for deployment.
-//#define DEBUG_MODE
-
-// --- Pin Definitions ---
-// Confirmed for LoRa32U4II board from provided pinout:
-// Arduino Pin 11 (PB7) -> PCINT7
-// Arduino Pin 10 (PB6) -> PCINT6
-// Arduino Pin 13 (PC7) -> Not a PCINT pin, but suitable for LED
-// Arduino Pin A9 (PB5) -> PCINT5 (used as Analog Input)
-
-#define BUTTON_PIN 11     // Connected to PB7, which is PCINT7 on ATmega32U4
-#define RTC_INT_PIN 10    // Connected to PB6, which is PCINT6 on ATmega32U4
-#define LED_PIN 13        // Onboard LED, confirmed as PC7 (distinct from BUTTON_PIN 11)
-#define OPTO_PIN 12       // Digital output for external control (e.g., controlling a sensor power)
-#define VBAT_PIN A9       // Analog input for battery voltage
-
-// --- LoRa Session Keys (ABP Mode) ---
-// These keys are specific to your LoRaWAN application and device.
-// REPLACE WITH YOUR OWN KEYS FOR DEPLOYMENT!
-uint8_t NwkSkey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t AppSkey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t DevAddr[4]  = {0x00, 0x00, 0x00, 0x00};
-
-// TinyLoRa instance: (NSS_PIN, DIO0_PIN, RST_PIN)
-// Verify these pins match your LoRa module's connection to the 32U4.
-TinyLoRa lora = TinyLoRa(7, 8, 4);
-DS3232RTC rtc;
-
-// --- Volatile Flags for Interrupts ---#include <EEPROM.h>
-#include <TinyLoRa.h>
-#include <SPI.h>
-#include <LowPower.h> // Manages sleep modes and peripheral power down
-#include <Wire.h>
-#include <DS3232RTC.h>
-
-// Define DEBUG_MODE to enable Serial prints. Comment out for deployment.
-//#define DEBUG_MODE
+#define DEBUG_MODE // Keep this for now for testing
 
 // --- Pin Definitions ---
 // Confirmed for LoRa32U4II board from provided pinout:
@@ -60,9 +25,9 @@ DS3232RTC rtc;
 // LoRaWAN ABP Mode Session Keys and Device Address.
 // !!! IMPORTANT: REPLACE THESE WITH YOUR OWN KEYS FOR DEPLOYMENT !!!
 // These are unique to your device and application on the LoRaWAN Network Server.
-uint8_t NwkSkey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t AppSkey[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t DevAddr[4]  = {0x00, 0x00, 0x00, 0x00};
+uint8_t NwkSkey[16] = {0xC0, 0xA5, 0x96, 0x9F, 0xC9, 0xB3, 0x85, 0x17, 0x62, 0x1E, 0xAF, 0x81, 0x4C, 0x57, 0x09, 0xF6};
+uint8_t AppSkey[16] = {0x14, 0xA7, 0xEB, 0x1A, 0x9C, 0xF5, 0xF9, 0x1C, 0x6A, 0x54, 0x46, 0xD7, 0x85, 0x56, 0xD0, 0x5F};
+uint8_t DevAddr[4]  = {0x00, 0x18, 0x9D, 0x6E};
 
 // TinyLoRa instance: (NSS_PIN, DIO0_PIN, RST_PIN)
 // Verify these pins match your LoRa module's connection to the 32U4.
@@ -84,7 +49,19 @@ uint8_t loraData[6];
 // --- Configuration Constants ---
 const uint8_t RTC_ALARM_HOUR = 6; // RTC alarm set for 6 AM (06:00:00)
 const int LORA_SEND_REPETITIONS = 3; // Number of times to send LoRa message per wake-up event
-const unsigned long BUTTON_LED_BLINK_DURATION_MS = 120000UL; // 2 minutes (120,000 milliseconds)
+
+// Constants for separate durations
+const unsigned long BUTTON_LED_BLINK_DURATION_MS = 120000UL; // 2 minutes (120,000 milliseconds) for LED blinking
+const unsigned long OPTO_PIN_ACTIVE_DURATION_MS = 60000UL;   // 5 seconds (5,000 milliseconds) for OPTO_PIN active
+
+// New variable to control OPTO_PIN functionality
+const bool OPTO_ENABLED = false; // Set to 'true' to enable OPTO_PIN, 'false' to disable
+
+// --- Function Prototypes ---
+void handleButtonWake();
+void handleRTCWake();
+void sendLoRaMessage(const char* label);
+float readBattery();
 
 // --- Interrupt Service Routine (ISR) ---
 // PCINT0_vect handles all Pin Change Interrupts on Port B (PCINT0 to PCINT7) for ATmega32U4.
@@ -124,9 +101,14 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(RTC_INT_PIN, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
-  pinMode(OPTO_PIN, OUTPUT); // Ensure OPTO_PIN is set as an OUTPUT
-  digitalWrite(LED_PIN, LOW);
-  digitalWrite(OPTO_PIN, LOW); // Ensure opto output is off initially
+  
+  // Only configure OPTO_PIN if enabled
+  if (OPTO_ENABLED) {
+    pinMode(OPTO_PIN, OUTPUT);
+    digitalWrite(OPTO_PIN, LOW); // Ensure opto output is off initially
+  }
+
+  digitalWrite(LED_PIN, LOW); // Ensure LED is off initially
 
   // Load frame counter from EEPROM.
   EEPROM.get(0, frameCounter);
@@ -193,6 +175,8 @@ void setup() {
 void loop() {
 #ifdef DEBUG_MODE
   Serial.println("Entering power-down sleep...");
+  Serial.flush(); // Ensure all pending Serial data is sent before sleep
+  delay(10); // Give a tiny moment for flush to complete (optional, but good practice)
 #endif
 
   // Enter the deepest sleep mode (Power-down).
@@ -203,6 +187,14 @@ void loop() {
 
   // --- MCU Woke Up! ---
   // Execution resumes here after an interrupt.
+
+#ifdef DEBUG_MODE
+  // IMPORTANT: Wait for Serial to re-initialize after waking up.
+  // On ATmega32U4 (Leonardo/Micro), USB Serial needs time to re-enumerate.
+  delay(200); 
+  Serial.println("\n--- Woke up from sleep! ---"); 
+  Serial.println("Processing wake-up event...");
+#endif
 
   // Disable interrupts temporarily to safely read and reset volatile flags.
   noInterrupts();
@@ -224,62 +216,141 @@ void loop() {
 // --- Function to Handle Button Wake-up ---
 void handleButtonWake() {
 #ifdef DEBUG_MODE
-  Serial.println("Woke up by Button! Processing event...");
+  Serial.println("\n--- handleButtonWake() Started ---");
 #endif
 
-  // ACTIVATE OPTO_PIN and LED for immediate feedback and external control.
-  digitalWrite(OPTO_PIN, HIGH);
-  digitalWrite(LED_PIN, HIGH);
+  // --- Initialize Timers and OPTO_PIN state ---
+  unsigned long funcStartTime = millis(); // Overall function start time (mainly for LED blinking duration)
+#ifdef DEBUG_MODE
+  Serial.print("funcStartTime: "); Serial.println(funcStartTime);
+#endif
 
-  // Increment frame counter ONCE per wake-up event and save to EEPROM immediately.
+  unsigned long optoPinDurationStartTime = 0; // This will track when the OPTO_PIN's 5-second timer officially begins
+
+  // ACTIVATE OPTO_PIN ONLY if OPTO_ENABLED is true
+  bool optoPinIsCurrentlyOn = false; 
+  if (OPTO_ENABLED) {
+    digitalWrite(OPTO_PIN, HIGH);
+    optoPinIsCurrentlyOn = true; 
+#ifdef DEBUG_MODE
+    Serial.println("OPTO_PIN activated (initial HIGH).");
+#endif
+  }
+
+  // Activate LED (turns on initially, then blinks)
+  digitalWrite(LED_PIN, HIGH);
+#ifdef DEBUG_MODE
+  Serial.println("LED activated (initial HIGH).");
+#endif
+
+  // Increment frame counter and save to EEPROM.
   frameCounter++;
   EEPROM.put(0, frameCounter);
 #ifdef DEBUG_MODE
-  Serial.print("FrameCounter updated for this button event: ");
-  Serial.println(frameCounter);
+  Serial.print("FrameCounter updated: "); Serial.println(frameCounter);
 #endif
 
   // Send LoRaWAN message multiple times for reliability.
   for (int i = 0; i < LORA_SEND_REPETITIONS; i++) {
 #ifdef DEBUG_MODE
     Serial.print("Sending LoRa message (Button) "); Serial.print(i + 1); Serial.print(" of "); Serial.println(LORA_SEND_REPETITIONS);
+    unsigned long preSendMillis = millis(); // For measuring send duration
 #endif
-    // The sendLoRaMessage function uses the current global frameCounter
-    sendLoRaMessage("00000"); // Send with a specific label for button wake-up
-    delay(1000);             // Short delay between sends
+    sendLoRaMessage("00001"); 
+#ifdef DEBUG_MODE
+    Serial.print("  LoRa send took: "); Serial.print(millis() - preSendMillis); Serial.println("ms");
+#endif
+    delay(1000);              
   }
 #ifdef DEBUG_MODE
   Serial.println("LoRa messages sent for button event.");
+  Serial.print("Millis after LoRa sends: "); Serial.println(millis());
 #endif
 
-  // Longer LED Blink for visual indication that the button event was processed.
+  // --- SET THE OPTO_PIN'S 5-SECOND DURATION START TIME *AFTER* LORA SENDS ---
+  // This ensures its independent duration starts counting after the blocking LoRa operations.
+  if (OPTO_ENABLED && optoPinIsCurrentlyOn) {
+     optoPinDurationStartTime = millis(); // The 5-second timer for OPTO_PIN starts from *this* moment
 #ifdef DEBUG_MODE
-  Serial.println("Starting 2-minute LED blink sequence.");
+     Serial.print("OPTO_PIN duration timer starts at: "); Serial.println(optoPinDurationStartTime);
 #endif
-  unsigned long startBlink = millis();
-  while (millis() - startBlink < BUTTON_LED_BLINK_DURATION_MS) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(250);
-    digitalWrite(LED_PIN, LOW);
-    delay(250);
   }
+
+  // --- Main loop for LED blinking and OPTO_PIN management ---
+  unsigned long currentMillis;
+  unsigned long elapsedSinceFuncStart; // Time elapsed since the very beginning of handleButtonWake()
+  unsigned long elapsedForOptoPin;     // Time elapsed since optoPinDurationStartTime
+
+  // Loop until the LED blink duration is over.
+  while (true) {
+    currentMillis = millis();
+    elapsedSinceFuncStart = currentMillis - funcStartTime; // For LED blinking duration
+    
+    // Check if OPTO_ENABLED, and if optoPinDurationStartTime has been set
+    if (OPTO_ENABLED && optoPinDurationStartTime != 0) { // optoPinDurationStartTime will be 0 if OPTO_ENABLED is false or not yet set
+        elapsedForOptoPin = currentMillis - optoPinDurationStartTime; 
+    } else {
+        // If OPTO is not enabled or its timer hasn't started (shouldn't happen with current flow),
+        // ensure elapsedForOptoPin doesn't cause premature deactivation.
+        elapsedForOptoPin = 0; // Or some large number if you want it to never turn off via this method
+    }
+
+    // 1. Control LED blinking based on BUTTON_LED_BLINK_DURATION_MS (relative to funcStartTime)
+    if (elapsedSinceFuncStart < BUTTON_LED_BLINK_DURATION_MS) {
+      // Only print when LED state changes to avoid clutter
+      static bool lastLedState = false; // Tracks last LED state for printing
+      bool currentLedState = ((elapsedSinceFuncStart % 500) < 250);
+      digitalWrite(LED_PIN, currentLedState ? HIGH : LOW);
+      if (currentLedState != lastLedState) {
 #ifdef DEBUG_MODE
-  Serial.println("LED blink sequence complete.");
+        Serial.print("LED "); Serial.print(currentLedState ? "ON" : "OFF"); 
+        Serial.print(" at "); Serial.print(currentMillis); 
+        Serial.print("ms (elapsed from func start: "); Serial.print(elapsedSinceFuncStart); 
+        Serial.println("ms)");
 #endif
+        lastLedState = currentLedState;
+      }
+    } else {
+      // LED blink duration has passed, so turn LED off and exit this loop.
+      digitalWrite(LED_PIN, LOW);
+#ifdef DEBUG_MODE
+      Serial.println("LED blink sequence complete. Exiting duration loop.");
+#endif
+      break; 
+    }
 
-  // DEACTIVATE OPTO_PIN and LED.
-  digitalWrite(OPTO_PIN, LOW);
-  digitalWrite(LED_PIN, LOW);
+    // 2. Control OPTO_PIN duration (relative to optoPinDurationStartTime)
+    // Only if OPTO is enabled, we initially turned it on, and its duration has elapsed.
+    if (OPTO_ENABLED && optoPinIsCurrentlyOn && (elapsedForOptoPin >= OPTO_PIN_ACTIVE_DURATION_MS)) {
+      digitalWrite(OPTO_PIN, LOW);
+#ifdef DEBUG_MODE
+      Serial.print("OPTO_PIN deactivated at "); Serial.print(currentMillis); 
+      Serial.print("ms (elapsed from opto start: "); Serial.print(elapsedForOptoPin); 
+      Serial.println("ms)");
+#endif
+      optoPinIsCurrentlyOn = false; // Mark that OPTO_PIN is now off
+    }
+    
+    delay(10); // Small delay to prevent busy-waiting and allow time for Serial prints
+  }
 
-  // Wait for the button to be released before re-enabling its interrupt.
-  // This prevents immediate re-triggering if the button is held down.
+  // --- Final cleanup after the main duration loop ---
+  // Ensure OPTO_PIN is OFF if it was enabled and is still HIGH (e.g., if LED duration ended before OPTO duration)
+  if (OPTO_ENABLED && digitalRead(OPTO_PIN) == HIGH) { // Check its physical state
+    digitalWrite(OPTO_PIN, LOW);
+#ifdef DEBUG_MODE
+    Serial.println("OPTO_PIN deactivated (final check).");
+#endif
+  }
+
+  // --- Wait for the button to be released before re-enabling its interrupt. ---
 #ifdef DEBUG_MODE
   Serial.println("Waiting for button release...");
 #endif
   while (digitalRead(BUTTON_PIN) == LOW) {
-    delay(10); // Small delay to prevent busy-waiting from consuming too much power
+    delay(10); // Small debounce delay
   }
-  delay(50); // Small debounce delay after the button is released.
+  delay(50); // Small debounce delay after release.
 #ifdef DEBUG_MODE
   Serial.println("Button released. Re-enabling interrupt.");
 #endif
@@ -288,6 +359,7 @@ void handleButtonWake() {
   PCMSK0 |= (1 << PCINT7);
 #ifdef DEBUG_MODE
   Serial.println("Button interrupt re-enabled. Returning to sleep.");
+  Serial.println("--- handleButtonWake() Finished ---");
 #endif
 }
 
@@ -310,8 +382,8 @@ void handleRTCWake() {
 #ifdef DEBUG_MODE
     Serial.print("Sending LoRa message (RTC) "); Serial.print(i + 1); Serial.print(" of "); Serial.println(LORA_SEND_REPETITIONS);
 #endif
-    sendLoRaMessage("00000"); // Send with a specific label for RTC wake-up
-    delay(1000);             // Short delay between sends
+    sendLoRaMessage("00002"); // Send with a specific label for RTC wake-up
+    delay(1000);              // Short delay between sends
   }
 #ifdef DEBUG_MODE
   Serial.println("LoRa messages sent for RTC event.");
@@ -354,7 +426,7 @@ void sendLoRaMessage(const char* label) {
 #endif
 
   loraData[0] = batteryPercent; // First byte of payload is battery percentage.
-  // Copy the label (e.g., "00000", "00000") into the next 5 bytes of the payload.
+  // Copy the label (e.g., "00001", "00002") into the next 5 bytes of the payload.
   // Ensure the label is exactly 5 characters long or adjust memcpy size.
   memcpy(&loraData[1], label, 5);
 
